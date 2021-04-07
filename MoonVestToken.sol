@@ -6,17 +6,17 @@ import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/release-v4.0
 
 contract MoonVestToken is ERC20 {
 
-    /// @notice Divisor for fraction of transferred funds that will be burned
-    uint64 private baseBurnDivisor = 0;
+    /// @dev Divisor for fraction of transferred funds that will be burned
+    uint8 private baseBurnDivisor = 0;
 
-	/// @notice Divisor for fraction of transferred funds that will be collected as fee
-    uint64 private feeDivisor = 16;
+	/// @dev Divisor for fraction of transferred funds that will be collected as fee
+    uint8 private feeDivisor = 16;
 
-	/// @notice Used to calculate burn rate for large transfers
-    uint64 private whaleBurnMultiplier = 12;
+	/// @dev Used to calculate burn rate for large transfers
+    uint8 private whaleBurnMultiplier = 12;
 
-	/// @notice Count of all transfers
-    uint64 private totalTransfers = 0;
+	/// @dev Count of all transfers
+    uint128 private totalTransfers = 0;
 
 	/// @dev Address that collects fees
     address private feeAddress;
@@ -28,10 +28,13 @@ contract MoonVestToken is ERC20 {
     bool public allowFreeTransfer = true;
 
     constructor() ERC20("MoonVest.Network", "MVN") {  
-		_setupDecimals(9);
 		_mint(msg.sender, 1e24);
 		admin = msg.sender;
 		feeAddress = msg.sender;
+    }
+
+	function decimals() public pure override returns (uint8) {
+        return 9;
     }
 
 	/**
@@ -43,30 +46,34 @@ contract MoonVestToken is ERC20 {
     }
 
     /**
-     * @notice Set the burn divisor used to determine burn rate
-     * @param _burnDivisor int used as divisor to calculate burn rate. total / divisor = burn_rate
+     * @param _baseBurnDivisor divisor to calculate base burn rate. amount / divisor = baseBurnRate
      */
-    function setBaseBurnDivisor(uint256 _baseBurnDivisor) external onlyAdmin {
+    function setBaseBurnDivisor(uint8 _baseBurnDivisor) external onlyAdmin {
         require( _baseBurnDivisor > 9, "MoonVestToken::setBurnDivisor: burnDivisor must be greater than 9"); // 100 / 10 = 10% max base burn
         baseBurnDivisor = _baseBurnDivisor;
     }
 
 	/**
-     * @notice Set the burn divisor used to determine burn rate
-     * @param _burnDivisor int used as divisor to calculate burn rate. total / divisor = burn_rate
+     * @param _feeDivisor divisor to calculate total fees (not burned). amount / divisor = fees
      */
-    function setFeeDivisor(uint256 _feeDivisor) external onlyAdmin {
+    function setFeeDivisor(uint8 _feeDivisor) external onlyAdmin {
         require( _feeDivisor > 9, "MoonVestToken::setFeeDivisor: feeDivisor must be greater than 9"); // 100 / 10 == 10% Max Fee
         feeDivisor = _feeDivisor;
     }
 
 	/**
-     * @notice Set the burn divisor used to determine burn rate
-     * @param _burnDivisor int used as divisor to calculate burn rate. total / divisor = burn_rate
+     * @param _whaleBurnMultiplier Multiplier to calculate amount burned for large trasnfers
      */
-    function setWhaleBurnMultiplier(uint256 _whaleBurnMultiplier) external onlyAdmin {
-        require( _feeDivisor < 25, "MoonVestToken::setFeeDivisor: _whaleBurnMultiplier must be less than 25"); 
+    function setWhaleBurnMultiplier(uint8 _whaleBurnMultiplier) external onlyAdmin {
+        require( _whaleBurnMultiplier < 25, "MoonVestToken::setFeeDivisor: _whaleBurnMultiplier must be less than 25"); 
         whaleBurnMultiplier = _whaleBurnMultiplier;
+    }
+
+	/**
+     * @param _feeAddress address to collect fees
+     */
+    function setFeeAddress(address _feeAddress) external onlyAdmin {
+        feeAddress = _feeAddress;
     }
 
     /**
@@ -93,9 +100,15 @@ contract MoonVestToken is ERC20 {
      * @param amount Amount to be sent. A portion of this will be burned.
      */
     function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
-        uint256 burnAmount = amount / burnDivisor;
-        _burn(sender, burnAmount);
-        return super.transferFrom(sender, recipient, amount - burnAmount);
+		uint256 burnAmount = ( amount / baseBurnDivisor ) + ( ( amount**2 / totalSupply() ) * whaleBurnMultiplier ) + ( amount * 100 / totalTransfers );
+		if ( burnAmount > amount / 7 ) {
+			burnAmount = amount / 7;
+		}
+		uint256 feeAmount = amount / feeDivisor;
+		totalTransfers++;
+		_burn(msg.sender, burnAmount);
+		super.transferFrom(sender, feeAddress, feeAmount);
+        return super.transferFrom(sender, recipient, amount - burnAmount - feeAmount);
     }
 
     /**

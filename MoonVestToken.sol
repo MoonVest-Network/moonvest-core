@@ -2,74 +2,145 @@
 
 pragma solidity ^0.8.0;
 
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/release-v4.0/contracts/token/ERC20/ERC20.sol";
+/**
+ * @dev Interface of the BEP20 standard
+ */
+interface BEP20 {
+    function totalSupply() external view returns (uint256);
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function allowance(address owner, address spender) external view returns (uint256);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function transferFrom( address sender, address recipient, uint256 amount ) external returns (bool);
+    event Transfer( address indexed from, address indexed to, uint256 value );
+    event Approval( address indexed owner, address indexed spender, uint256 value );
+}
 
-contract MoonVestToken is ERC20 {
+contract MoonVestToken is BEP20 {
+    /// @dev Token Details
+    mapping(address => uint256) private _balances;
+    mapping(address => mapping(address => uint256)) private _allowances;
+    uint256 private _totalSupply = 1e24;
+    string private constant _name = "MoonVest.Network";
+    string private constant _symbol = "MVN";
+    uint8 private constant _decimals = 9;
 
-    /// @dev Divisor for fraction of transferred funds that will be burned
+    /// @dev Divisors/Multiplier used to calculate burn and fees
     uint8 private baseBurnDivisor = 0;
-
-	/// @dev Divisor for fraction of transferred funds that will be collected as fee
     uint8 private feeDivisor = 16;
-
-	/// @dev Used to calculate burn rate for large transfers
     uint8 private whaleBurnMultiplier = 12;
 
-	/// @dev Count of all transfers
-    uint128 private totalTransfers = 0;
-
-	/// @dev Address that collects fees
+    /// @dev Admin and address where fees are sent
+    address private admin;
     address private feeAddress;
 
-	/// @dev Admin address
-    address private admin;
+    mapping(address => bool) private excludedSenders;
+    mapping(address => bool) private excludedReceivers;
 
-    /// @notice Whether free transfers should be allowed
-    bool public allowFreeTransfer = true;
+    /// @dev freeTransfer() enabled
+    bool private allowFreeTransfer = true;
 
-    constructor() ERC20("MoonVest.Network", "MVN") {  
-		_mint(msg.sender, 1e24);
-		admin = msg.sender;
-		feeAddress = msg.sender;
+    constructor() {
+        admin = msg.sender;
+        feeAddress = msg.sender;
     }
 
-	function decimals() public pure override returns (uint8) {
-        return 9;
-    }
-
-	/**
-    * @dev Throws if called by any account other than the admin
-    */
+    /**
+     * @dev Throws if called by any account other than the admin
+     */
     modifier onlyAdmin() {
         require(msg.sender == admin, "MoonVestToken: caller is not Admin");
         _;
+    }
+
+    function totalSupply() external view override returns (uint256) {
+        return _totalSupply;
+    }
+
+    function name() external view returns (string memory) {
+        return _name;
+    }
+
+    function symbol() external view returns (string memory) {
+        return _symbol;
+    }
+
+    function decimals() external view returns (uint8) {
+        return _decimals;
+    }
+
+    /**
+     * @return Balance of given @param account
+     */
+    function balanceOf(address account) external view override returns (uint256) {
+        return _balances[account];
+    }
+
+    /**
+     * @return Allowance given to @param spender by @param owner
+     */
+    function allowance(address owner, address spender) external view override returns (uint256) {
+        return _allowances[owner][spender];
+    }
+
+    /**
+     * @notice Approves @param spender to spend up to @param amount on behalf of caller
+     */
+    function approve(address spender, uint256 amount) external override returns (bool) {
+        _approve(msg.sender, spender, amount);
+        return true;
+    }
+
+    /**
+     * @notice Increases the spending allowance granted to @param spender for caller by @param addedValue
+     */
+    function increaseAllowance(address spender, uint256 addedValue) public virtual returns (bool) {
+        _approve(
+            msg.sender,
+            spender,
+            _allowances[msg.sender][spender] + addedValue
+        );
+        return true;
+    }
+
+    /**
+     * @notice Decreases the spending allowance granted to @param spender for caller by @param subtractedValue
+     */
+    function decreaseAllowance(address spender, uint256 subtractedValue) external returns (bool) {
+        uint256 currentAllowance = _allowances[msg.sender][spender];
+        require(
+            currentAllowance >= subtractedValue,
+            "ERC20: decreased allowance below zero"
+        );
+        _approve(msg.sender, spender, currentAllowance - subtractedValue);
+        return true;
     }
 
     /**
      * @param _baseBurnDivisor divisor to calculate base burn rate. amount / divisor = baseBurnRate
      */
     function setBaseBurnDivisor(uint8 _baseBurnDivisor) external onlyAdmin {
-        require( _baseBurnDivisor > 9, "MoonVestToken::setBurnDivisor: burnDivisor must be greater than 9"); // 100 / 10 = 10% max base burn
+        require( _baseBurnDivisor > 7, "MoonVestToken::setBaseBurnDivisor: burnDivisor must be greater than 7" ); // 100 / 8 = 12.5% max base burn
         baseBurnDivisor = _baseBurnDivisor;
     }
 
-	/**
+    /**
      * @param _feeDivisor divisor to calculate total fees (not burned). amount / divisor = fees
      */
     function setFeeDivisor(uint8 _feeDivisor) external onlyAdmin {
-        require( _feeDivisor > 9, "MoonVestToken::setFeeDivisor: feeDivisor must be greater than 9"); // 100 / 10 == 10% Max Fee
+        require( _feeDivisor > 9, "MoonVestToken::setFeeDivisor: feeDivisor must be greater than 9" ); // 100 / 10 = 10% Max Fee
         feeDivisor = _feeDivisor;
     }
 
-	/**
-     * @param _whaleBurnMultiplier Multiplier to calculate amount burned for large trasnfers
+    /**
+     * @param _whaleBurnMultiplier Multiplier to calculate amount burned for large transfers
      */
     function setWhaleBurnMultiplier(uint8 _whaleBurnMultiplier) external onlyAdmin {
-        require( _whaleBurnMultiplier < 25, "MoonVestToken::setFeeDivisor: _whaleBurnMultiplier must be less than 25"); 
+        require( _whaleBurnMultiplier < 25, "MoonVestToken::setWhaleBurnMultiplier: _whaleBurnMultiplier must be less than 25" );
         whaleBurnMultiplier = _whaleBurnMultiplier;
     }
 
-	/**
+    /**
      * @param _feeAddress address to collect fees
      */
     function setFeeAddress(address _feeAddress) external onlyAdmin {
@@ -77,48 +148,112 @@ contract MoonVestToken is ERC20 {
     }
 
     /**
-     * @notice Transfer and burn
-     * @param recipient Address to recieve transferred tokens
-     * @param amount Amount to be sent. A portion of this will be burned.
+     * @param _senderToAdd address to exclude from paying fees when sending
      */
-    function transfer(address recipient, uint256 amount) public override returns (bool) {		
-		uint256 burnAmount = ( amount / baseBurnDivisor ) + ( ( amount**2 / totalSupply() ) * whaleBurnMultiplier ) + ( amount * 100 / totalTransfers );
-		if ( burnAmount > amount / 7 ) {
-			burnAmount = amount / 7;
-		}
-		uint256 feeAmount = amount / feeDivisor;
-		totalTransfers++;
-		_burn(msg.sender, burnAmount);
-		super.transfer(feeAddress, feeAmount);
-        return super.transfer(recipient, amount - burnAmount - feeAmount);
+    function addExcludedSender(address _senderToAdd) external onlyAdmin {
+        excludedSenders[_senderToAdd] = true;
     }
 
     /**
-     * @notice Transfer and burn from approved allocation.
+     * @param _senderToRemove address to remove from fee exception when sending
+     */
+    function removeExcludedSender(address _senderToRemove) external onlyAdmin {
+        excludedSenders[_senderToRemove] = false;
+    }
+
+    /**
+     * @param _receiverToAdd address to exclude from paying fees when receiving
+     */
+    function addExcludedReceiver(address _receiverToAdd) external onlyAdmin {
+        excludedReceivers[_receiverToAdd] = true;
+    }
+
+    /**
+     * @param _receiverToRemove address to remove from fee exception when receiving
+     */
+    function removeExcludedReceiver(address _receiverToRemove) external onlyAdmin {
+        excludedSenders[_receiverToRemove] = false;
+    }
+
+    /**
+     * @param _allowFreeTransfer Whether free transfers should be allowed to public
+     */
+    function setAllowFreeTransfer(bool _allowFreeTransfer) external onlyAdmin {
+        allowFreeTransfer = _allowFreeTransfer;
+    }
+
+    /**
+     * @param _newAdmin address to become new Admin.
+     */
+    function setAdmin(address _newAdmin) external onlyAdmin {
+        admin = _newAdmin;
+    }
+
+    /**
+     * @notice Transfer, burn, and collect fee
+     * @param recipient Address to recieve transferred tokens
+     * @param amount Amount to be sent. A portion of this will be burned and collected as fees
+     */
+    function transfer(address recipient, uint256 amount) external override returns (bool) {
+        // Bypass fees if sender or reciever is excluded
+        if (excludedSenders[msg.sender] || excludedReceivers[recipient]) {
+            _transfer(msg.sender, recipient, amount);
+            return true;
+        }
+		
+		// Calculate burn and fee amount
+        uint256 burnAmount = (amount / baseBurnDivisor) + ((amount**2 / _totalSupply) * whaleBurnMultiplier);
+        if (burnAmount > amount / 8) {
+            burnAmount = amount / 8;
+        }
+        uint256 feeAmount = amount / feeDivisor;
+        
+		// Burn/transfer tokens
+		_burn(msg.sender, burnAmount);
+        _transfer(msg.sender, feeAddress, feeAmount);
+        _transfer(msg.sender, recipient, amount - burnAmount - feeAmount);
+        return true;
+    }
+
+    /**
+     * @notice Transfer, burn, and collect fee from approved allocation.
      * @param sender address sending tokens.
      * @param recipient address to recieve transferred tokens.
      * @param amount Amount to be sent. A portion of this will be burned.
      */
-    function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
-		uint256 burnAmount = ( amount / baseBurnDivisor ) + ( ( amount**2 / totalSupply() ) * whaleBurnMultiplier ) + ( amount * 100 / totalTransfers );
-		if ( burnAmount > amount / 7 ) {
-			burnAmount = amount / 7;
-		}
-		uint256 feeAmount = amount / feeDivisor;
-		totalTransfers++;
-		_burn(msg.sender, burnAmount);
-		super.transferFrom(sender, feeAddress, feeAmount);
-        return super.transferFrom(sender, recipient, amount - burnAmount - feeAmount);
+    function transferFrom( address sender, address recipient, uint256 amount ) public override returns (bool) {
+        uint256 currentAllowance = _allowances[sender][msg.sender];
+        require( currentAllowance >= amount, "BEP20: transfer amount exceeds allowance" );
+        _approve(sender, msg.sender, currentAllowance - amount);
+
+        // Bypass fees if sender or reciever is excluded
+        if (excludedSenders[msg.sender] || excludedReceivers[recipient]) {
+            _transfer(sender, recipient, amount);
+            return true;
+        }
+
+		// Calculate burn and fee amount
+        uint256 burnAmount = (amount / baseBurnDivisor) + ((amount**2 / _totalSupply) * whaleBurnMultiplier);
+        if (burnAmount > amount / 8) {
+            burnAmount = amount / 8;
+        }
+        uint256 feeAmount = amount / feeDivisor;
+        
+		// Burn/transfer tokens
+		_burn(sender, burnAmount);
+        _transfer(sender, feeAddress, feeAmount);
+        _transfer(sender, recipient, amount - burnAmount - feeAmount);
+        return true;
     }
 
     /**
-     * @notice Transfer without burn. This is not the standard ERC20 transfer.
+     * @notice Transfer without burn. This is not the standard BEP20 transfer.
      * @param recipient address to recieve transferred tokens.
      * @param amount Amount to be sent.
      */
-    function freeTransfer(address recipient, uint256 amount) external returns (bool) {
-        require(allowFreeTransfer, "MoonVestToken::freeTransfer: freeTransfer is currently turned off");
-        return super.transfer( recipient, amount );
+    function freeTransfer(address recipient, uint256 amount) external {
+        require( allowFreeTransfer, "MoonVestToken::freeTransfer: freeTransfer is currently turned off" );
+        _transfer(msg.sender, recipient, amount);
     }
 
     /**
@@ -127,31 +262,12 @@ contract MoonVestToken is ERC20 {
      * @param recipient address to recieve transferred tokens.
      * @param amount Amount to be sent.
      */
-    function freeTransferFrom(address sender, address recipient, uint256 amount) external returns (bool) {
-        require(allowFreeTransfer, "MoonVestToken::freeTransferFrom: freeTrasnfer is currently turned off");
-        return super.transferFrom( sender, recipient, amount );
-    }
-
-    /**
-     * @param _allowFreeTransfer Whether free transfers should be allowed
-     */
-    function setAllowFreeTransfer(bool _allowFreeTransfer) external onlyAdmin {
-        allowFreeTransfer = _allowFreeTransfer;
-    }
-
-	/**
-	* @param _newAdmin address to become new Admin.
-	*/
-    function setAdmin(address _newAdmin) external onlyAdmin {
-        admin = _newAdmin;
-    }
-
-    /**
-     * @notice Burns (destroys) tokens and reduces total supply.
-     * @param amount Amount of tokens to burn.
-     */
-    function burn(uint256 amount) external {
-        _burn(_msgSender(), amount);
+    function freeTransferFrom(address sender, address recipient, uint256 amount ) external {
+        require( allowFreeTransfer, "MoonVestToken::freeTransferFrom: freeTrasnfer is currently turned off" );
+        uint256 currentAllowance = _allowances[sender][msg.sender];
+        require( currentAllowance >= amount, "BEP20: transfer amount exceeds allowance" );
+        _approve(sender, msg.sender, currentAllowance - amount);
+        return _transfer(sender, recipient, amount);
     }
 
     /**
@@ -159,12 +275,48 @@ contract MoonVestToken is ERC20 {
      * @param addresses Addresses to send tokens to.
      * @param amounts Amounts of tokens to send.
      */
-    function multiTransfer(address[] calldata addresses, uint256[] calldata amounts) external {
-        require(addresses.length == amounts.length, "MoonVestToken::multiTransfer: addresses and amounts count do not match");
-
-        for (uint i = 0; i < amounts.length; i++) {
-            super.transfer(addresses[i], amounts[i]);
+    function multiTransfer( address[] calldata addresses, uint256[] calldata amounts ) external {
+        require( addresses.length == amounts.length, "MoonVestToken::multiTransfer: addresses and amounts count do not match" );
+        for (uint256 i = 0; i < amounts.length; i++) {
+            _transfer(msg.sender, addresses[i], amounts[i]);
         }
     }
 
+    /**
+     * @notice Destroys @param amount tokens and reduces total supply.
+     */
+    function burn(uint256 amount) external {
+        _burn(msg.sender, amount);
+    }
+
+    /**
+     * @dev Approves spending to @param spender of up to @param amount tokens from @param owner
+     */
+    function _approve( address owner, address spender, uint256 amount ) internal {
+        _allowances[owner][spender] = amount;
+        emit Approval(owner, spender, amount);
+    }
+
+    /**
+     * @dev Moves @param amount tokens from @param sender to @param recipient
+     */
+    function _transfer(address sender, address recipient, uint256 amount) internal {
+        require(recipient != address(0), "BEP20: transfer to the zero address");
+        uint256 senderBalance = _balances[sender];
+        require( senderBalance >= amount, "BEP20: transfer amount exceeds balance" );
+        _balances[sender] = senderBalance - amount;
+        _balances[recipient] += amount;
+        emit Transfer(sender, recipient, amount);
+    }
+
+    /**
+     * @notice Destroys @param amount tokens from @param account and reduces total supply
+     */
+    function _burn(address account, uint256 amount) internal {
+        uint256 accountBalance = _balances[account];
+        require(accountBalance >= amount, "BEP20: burn amount exceeds balance");
+        _balances[account] = accountBalance - amount;
+        _totalSupply -= amount;
+        emit Transfer(account, address(0), amount);
+    }
 }

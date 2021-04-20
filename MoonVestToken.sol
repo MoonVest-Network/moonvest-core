@@ -18,19 +18,19 @@ interface BEP20 {
 
 contract MoonVestToken is BEP20 {
     /// @dev Token Details
+	string public constant name = "MoonVest.Network";
+    string public constant symbol = "MVN";
+    uint8 public constant decimals = 12;
     mapping(address => uint256) private balances;
     mapping(address => mapping(address => uint256)) private allowances;
-    uint256 public baseSupply = 1e21;
-	uint256 public _totalSupply = 1e21;
-    string public constant name = "MoonVest.Network";
-    string public constant symbol = "MVN";
-    uint8 public constant decimals = 9;
+    uint256 private baseSupply = 1e24;
+	uint256 private _totalSupply = 1e24;
 
     /// @dev Divisors/Multiplier used to calculate burn and fees
-    uint32 private baseBurnDivisor = 10000;
-	uint32 private hodlerFeeDivisor = 10000;
-    uint32 private externalFeeDivisor = 10000;
-    uint8 private whaleBurnMultiplier = 1;
+    uint32 private baseBurnDivisor = 30;
+	uint32 private hodlerFeeDivisor = 50;
+    uint32 private externalFeeDivisor = 1000;
+    uint8 private whaleBurnMultiplier = 50;
 
     /// @dev Admin and address where fees are sent
     address private admin;
@@ -108,7 +108,7 @@ contract MoonVestToken is BEP20 {
      * @param _baseBurnDivisor divisor to calculate base burn rate. amount / divisor = baseBurnRate
      */
     function setBaseBurnDivisor(uint8 _baseBurnDivisor) external onlyAdmin {
-        require( _baseBurnDivisor > 7, "MoonVestToken::setBaseBurnDivisor: burnDivisor must be greater than 7" ); // 100 / 8 = 12.5% max base burn
+        require( _baseBurnDivisor > 19, "MoonVestToken::setBaseBurnDivisor: baseBurnDivisor must be greater than 19" ); // 1/20 = 5% max base burn
         baseBurnDivisor = _baseBurnDivisor;
     }
 
@@ -116,7 +116,7 @@ contract MoonVestToken is BEP20 {
      * @param _hodlerFeeDivisor divisor to calculate fees to Hodlers. amount / divisor = fees
      */
     function setHodlerFeeDivisor(uint8 _hodlerFeeDivisor) external onlyAdmin {
-        require( _hodlerFeeDivisor > 9, "MoonVestToken::setFeeDivisor: feeDivisor must be greater than 9" ); // 100 / 10 = 10% Max Fee
+        require( _hodlerFeeDivisor > 19, "MoonVestToken::setFeeDivisor: hodlerFeeDivisor must be greater than 19" ); // 1/20 = 5% Max Fee
         hodlerFeeDivisor = _hodlerFeeDivisor;
     }
 
@@ -124,7 +124,7 @@ contract MoonVestToken is BEP20 {
      * @param _externalFeeDivisor divisor to calculate fees to Hodlers. amount / divisor = fees
      */
     function setExternalFeeDivisor(uint8 _externalFeeDivisor) external onlyAdmin {
-        require( _externalFeeDivisor > 9, "MoonVestToken::setFeeDivisor: feeDivisor must be greater than 9" ); // 100 / 10 = 10% Max Fee
+        require( _externalFeeDivisor > 19, "MoonVestToken::setFeeDivisor: externalFeeDivisor must be greater than 19" ); // 1/20 = 5% Max Fee
         externalFeeDivisor = _externalFeeDivisor;
     }
 
@@ -132,7 +132,7 @@ contract MoonVestToken is BEP20 {
      * @param _whaleBurnMultiplier Multiplier to calculate amount burned for large transfers
      */
     function setWhaleBurnMultiplier(uint8 _whaleBurnMultiplier) external onlyAdmin {
-        require( _whaleBurnMultiplier < 25, "MoonVestToken::setWhaleBurnMultiplier: _whaleBurnMultiplier must be less than 25" );
+        require( _whaleBurnMultiplier < 30, "MoonVestToken::setWhaleBurnMultiplier: _whaleBurnMultiplier must be less than 30" );
         whaleBurnMultiplier = _whaleBurnMultiplier;
     }
 
@@ -233,7 +233,7 @@ contract MoonVestToken is BEP20 {
     }
 
 	/**
-     * @notice Transfer without burn. This is not the standard BEP20 transfer.
+     * @notice Transfer without burn/fees. This is not the standard BEP20 transfer.
      * @param recipient address to recieve transferred tokens.
      * @param amount Amount to be sent.
      */
@@ -243,7 +243,7 @@ contract MoonVestToken is BEP20 {
     }
 
     /**
-     * @notice Transfer without burn from approved allowance. This is not the standard ERC20 transferFrom.
+     * @notice Transfer without burn from approved allowance. This is not the standard BEP20 transferFrom.
      * @param sender address sending tokens.
      * @param recipient address to recieve transferred tokens.
      * @param amount Amount to be sent.
@@ -290,8 +290,8 @@ contract MoonVestToken is BEP20 {
 	function _transferWithFees( address sender, address recipient, uint256 amount ) private {
 		// Calculate burn and fee amount
         uint256 burnAmount = (amount / baseBurnDivisor) + ((amount**2 / _totalSupply) * whaleBurnMultiplier);
-        if (burnAmount > amount / 8) {
-            burnAmount = amount / 8;
+        if (burnAmount > amount / 10) {
+            burnAmount = amount / 10;
         }
 		uint256 externalFeeAmount = amount / externalFeeDivisor;
 		uint256 hodlerFeeAmount = amount / hodlerFeeDivisor;

@@ -391,24 +391,19 @@ contract MoonVestToken is BEP20 {
         uint256 amount
     ) private {
         // Calculate burn and fee amount
-        uint256 burnAmount =
-            (amount / baseBurnDivisor) +
-                ((amount**2 / _totalSupply) * whaleBurnMultiplier);
+        uint256 burnAmount =(amount / baseBurnDivisor) + ((amount**2 / _totalSupply) * whaleBurnMultiplier);
         if (burnAmount > amount / 10) {
             burnAmount = amount / 10;
         }
         uint256 externalFeeAmount = amount / externalFeeDivisor;
         uint256 hodlerFeeAmount = amount / hodlerFeeDivisor;
-        uint256 recipientAmount =
-            amount - burnAmount - externalFeeAmount - hodlerFeeAmount;
+        uint256 recipientAmount = amount - burnAmount - externalFeeAmount - hodlerFeeAmount;
 
         // Burn/transfer tokens
         balances[sender] -= (amount * baseSupply) / _totalSupply;
         balances[feeAddress] += (externalFeeAmount * baseSupply) / _totalSupply;
         balances[recipient] += (recipientAmount * baseSupply) / _totalSupply;
-        baseSupply -=
-            ((hodlerFeeAmount + burnAmount) * baseSupply) /
-            _totalSupply;
+        baseSupply -= ((hodlerFeeAmount + burnAmount) * baseSupply) / _totalSupply;
         _totalSupply -= burnAmount;
         _removeDust(sender);
         emit Transfer(sender, address(0), burnAmount);
